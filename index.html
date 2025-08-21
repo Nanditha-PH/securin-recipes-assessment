@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recipes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+  <div class="max-w-7xl mx-auto p-4">
+    <h1 class="text-2xl font-bold mb-4">Recipes</h1>
+
+    <div class="flex items-center gap-4 mb-4">
+      <label class="text-sm">Results per page:
+        <select id="limit" class="border rounded p-1">
+          <option>15</option>
+          <option selected>20</option>
+          <option>25</option>
+          <option>30</option>
+          <option>40</option>
+          <option>50</option>
+        </select>
+      </label>
+      <div class="text-sm text-gray-600" id="status"></div>
+    </div>
+
+    <div class="overflow-auto border rounded-lg bg-white">
+      <table class="min-w-full text-sm" id="recipesTable">
+        <thead class="bg-gray-100 sticky top-0">
+          <tr>
+            <th class="p-3 text-left w-2/5">Title
+              <input id="filter-title" placeholder="Filter..." class="mt-1 border rounded p-1 w-full text-xs" />
+            </th>
+            <th class="p-3 text-left w-1/5">Cuisine
+              <input id="filter-cuisine" placeholder="Filter..." class="mt-1 border rounded p-1 w-full text-xs" />
+            </th>
+            <th class="p-3 text-left w-1/6">Rating
+              <input id="filter-rating" placeholder="e.g. >=4.5" class="mt-1 border rounded p-1 w-full text-xs" />
+            </th>
+            <th class="p-3 text-left w-1/6">Total Time
+              <input id="filter-total-time" placeholder="e.g. <=60" class="mt-1 border rounded p-1 w-full text-xs" />
+            </th>
+            <th class="p-3 text-left w-1/6">Serves</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between mt-4">
+      <button id="prev" class="px-3 py-1 rounded border">Prev</button>
+      <div id="pageInfo" class="text-sm"></div>
+      <button id="next" class="px-3 py-1 rounded border">Next</button>
+    </div>
+
+    <div id="empty" class="hidden mt-6 p-6 bg-yellow-50 border border-yellow-200 rounded text-yellow-900">
+      No results found. Try adjusting your filters.
+    </div>
+  </div>
+
+  <!-- Drawer -->
+  <div id="drawer" class="fixed top-0 right-0 w-full max-w-lg h-full bg-white shadow-2xl translate-x-full transition-transform">
+    <div class="p-4 border-b flex items-center justify-between">
+      <div>
+        <h2 id="drawer-title" class="text-xl font-semibold"></h2>
+        <p id="drawer-cuisine" class="text-sm text-gray-600"></p>
+      </div>
+      <button id="closeDrawer" class="text-gray-500">&times;</button>
+    </div>
+    <div class="p-4 space-y-4 overflow-y-auto h-[calc(100%-64px)]">
+      <div>
+        <div class="text-xs font-semibold text-gray-500">Description</div>
+        <div id="drawer-description" class="text-sm"></div>
+      </div>
+      <div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold text-gray-500">Total Time</div>
+            <div id="drawer-total" class="text-sm"></div>
+          </div>
+          <button id="expandTimes" class="text-blue-600 text-sm underline">Expand</button>
+        </div>
+        <div id="timesDetail" class="hidden mt-2 pl-3 border-l text-sm text-gray-700"></div>
+      </div>
+      <div>
+        <div class="text-base font-semibold mb-2">Nutrition</div>
+        <table class="w-full text-sm border">
+          <tbody id="nutriBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tbody = document.getElementById('tbody')
+    const pageInfo = document.getElementById('pageInfo')
+    const statusEl = document.getElementById('status')
+    const emptyEl = document.getElementById('empty')
+    const limitEl = document.getElementById('limit')
+    let page = 1
+
+    const filters = {
+      title: document.getElementById('filter-title'),
+      cuisine: document.getElementById('filter-cuisine'),
+      rating: document.getElementById('filter-rating'),
+      total_time: document.getElementById('filter-total-time'),
+    }
+
+    function starRating(r) {
+      if (r == null) return '<span class="text-gray-400">—</span>'
+      const full = Math.round(r) // simple
+      return '★'.repeat(full) + '☆'.repeat(5-full) + ` <span class="text-xs text-gray-600">(${r.toFixed(1)})</span>`
+    }
+
+    function truncate(text, max = 60) {
+      if (!text) return ''
+      return text.length > max ? text.slice(0, max-1) + '…' : text
+    }
+
+    function qs(params) {
+      return Object.entries(params)
+        .filter(([_, v]) => v != null && v !== '')
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&')
+    }
+
+    async function fetchData() {
+      const limit = parseInt(limitEl.value, 10) || 20
+      const hasFilters = Object.values(filters).some(i => i.value && i.value.trim() !== '')
+      const url = hasFilters
+        ? `/api/recipes/search?${qs({ page, limit, title: filters.title.value, cuisine: filters.cuisine.value, rating: filters.rating.value, total_time: filters.total_time.value })}`
+        : `/api/recipes?${qs({ page, limit })}`
+
+      statusEl.textContent = 'Loading…'
+      const res = await fetch(url)
+      const json = await res.json()
+      statusEl.textContent = ''
+      render(json)
+    }
+
+    function render(json) {
+      const data = json.data || []
+      tbody.innerHTML = ''
+      if (data.length === 0) {
+        emptyEl.classList.remove('hidden')
+      } else {
+        emptyEl.classList.add('hidden')
+      }
+      for (const row of data) {
+        const tr = document.createElement('tr')
+        tr.className = 'border-b hover:bg-gray-50 cursor-pointer'
+        tr.innerHTML = `
+          <td class="p-3 align-top"><div class="truncate max-w-[420px]" title="${row.title||''}">${truncate(row.title||'', 70)}</div></td>
+          <td class="p-3 align-top">${row.cuisine||''}</td>
+          <td class="p-3 align-top">${starRating(row.rating)}</td>
+          <td class="p-3 align-top">${row.total_time ?? '—'}</td>
+          <td class="p-3 align-top">${row.serves || '—'}</td>
+        `
+        tr.addEventListener('click', () => openDrawer(row))
+        tbody.appendChild(tr)
+      }
+      pageInfo.textContent = `Page ${json.page} • Total ${json.total}`
+    }
+
+    document.getElementById('prev').addEventListener('click', () => { if (page>1) { page--; fetchData() } })
+    document.getElementById('next').addEventListener('click', () => { page++; fetchData() })
+    limitEl.addEventListener('change', () => { page = 1; fetchData() })
+
+    let timer
+    for (const el of Object.values(filters)) {
+      el.addEventListener('input', () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => { page = 1; fetchData() }, 300)
+      })
+    }
+
+    // Drawer logic
+    const drawer = document.getElementById('drawer')
+    const closeDrawer = document.getElementById('closeDrawer')
+    const expandBtn = document.getElementById('expandTimes')
+    const timesDetail = document.getElementById('timesDetail')
+
+    function openDrawer(row) {
+      document.getElementById('drawer-title').textContent = row.title || ''
+      document.getElementById('drawer-cuisine').textContent = row.cuisine || ''
+      document.getElementById('drawer-description').textContent = row.description || ''
+      document.getElementById('drawer-total').textContent = (row.total_time ?? '—')
+      timesDetail.innerHTML = `<div>Prep Time: ${row.prep_time ?? '—'}</div><div>Cook Time: ${row.cook_time ?? '—'}</div>`
+      document.getElementById('nutriBody').innerHTML = renderNutrition(row.nutrients || {})
+      drawer.classList.remove('translate-x-full')
+    }
+    closeDrawer.addEventListener('click', () => drawer.classList.add('translate-x-full'))
+    expandBtn.addEventListener('click', () => timesDetail.classList.toggle('hidden'))
+
+    function renderNutrition(n) {
+      const keys = ["calories","carbohydrateContent","cholesterolContent","fiberContent","proteinContent","saturatedFatContent","sodiumContent","sugarContent","fatContent"]
+      return keys.map(k => `
+        <tr class="border-b">
+          <td class="p-2 font-medium">${k}</td>
+          <td class="p-2">${n[k] ?? '—'}</td>
+        </tr>`).join('')
+    }
+
+    fetchData()
+  </script>
+</body>
+</html>
